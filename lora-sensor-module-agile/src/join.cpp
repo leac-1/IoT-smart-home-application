@@ -70,14 +70,36 @@ bool sendJoinRequest() {
 }
 
 bool receiveJoinAccept(NodeConfig& config) {
-    // TODO: listen on Serial2 for incoming packet
-    // Check packet type is 0x12 (JOIN accept)
-    // Extract from payload:
-    //   byte 0: assigned node ID
-    //   byte 1: TDMA slot
-    // Extract sleep time from 0x13 Configuration packet if sent separately
-    // Populate config struct and return true
     Serial.println("Waiting for join accept...");
+    unsigned long start = millis();
+    const unsigned long timeout = 5000; // 5 second timeout
+
+    while (millis() - start < timeout) {
+        if (Serial2.available()) {
+            String response = Serial2.readStringUntil('\n');
+            Serial.println("RN2483: " + response);
+
+            if (response.indexOf("radio_rx") >= 0) {
+                // Extract hex payload
+                    int startIdx = response.indexOf("radio_rx") + 9;
+                    String hexPayload = response.substring(startIdx);
+
+                if (hexPayload.length() >= 8) {
+                    int packetType = strtol(hexPayload.substring(6, 8).c_str(), NULL, 16);
+                    // Check for JOIN accept (0x12)
+                    if (packetType == 0x12) {
+                        // Extract node ID/address from byte 0 (chars 0-2)
+                        config.nodeId = strtol(hexPayload.substring(0, 2).c_str(), NULL, 16);
+                        // Extract TDMA slot from byte 1 (chars 2-4)
+                        config.tdmaSlot = strtol(hexPayload.substring(2, 4).c_str(), NULL, 16);
+                        Serial.printf("Join accepted! Node ID: %d, TDMA Slot: %d\n", config.nodeId, config.tdmaSlot);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    Serial.println("Join accept timeout");
     return false;
 }
 
@@ -99,6 +121,8 @@ bool joinNetwork(NodeConfig& config, int maxRetries) {
             Serial.printf("Joined! Assigned ID: %d\n", config.nodeId);
             return true;
         }
+
+
 
         Serial.println("No join accept received, retrying...");
     }
