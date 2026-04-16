@@ -19,7 +19,7 @@ void setup() {
     delay(1000);
 
     initSensors();
-    // initLoRa();
+    initLoRa();
 
     SensorData data = readSensors();
 
@@ -41,9 +41,9 @@ void setup() {
     }
     Serial.println();
 
-    // bool ok = sendPayload(payload, length);
-    // Serial.print("Send status: ");
-    // Serial.println(ok ? "OK" : "FAIL");
+    bool ok = sendPayload(payload, length);
+    Serial.print("Send status: ");
+    Serial.println(ok ? "OK" : "FAIL");
 
     // goToSleep(); // comment this out too, or you won't see anything
 }
