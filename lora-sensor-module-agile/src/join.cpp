@@ -15,17 +15,26 @@ bool waitForBeacon(unsigned long timeoutMs) {
             Serial.println("RN2483: " + response);
 
             if (response.indexOf("radio_rx") >= 0) {
-                // TODO: extract hex payload from response
-                // TODO: parse packet header — check byte 3 == 0x11 (Beacon)
-                // For now, treat any received packet as a beacon
-                Serial.println("Packet received — assuming beacon");
-                return true;
+                // Extract hex payload from response
+                int startIdx = response.indexOf("radio_rx") + 9; // Skip "radio_rx  "
+                String hexPayload = response.substring(startIdx);
+                
+                // Parse packet header — check byte 3 == 0x11 (Beacon)
+                if (hexPayload.length() >= 8) { // At least 4 bytes (8 hex chars)
+                    int packetType = strtol(hexPayload.substring(6, 8).c_str(), NULL, 16);
+                    if (packetType == 0x11) {
+                        Serial.println("Packet received — assuming beacon");
+                        return true;
+                    }
+                }
             }
+            // For now, treat any received packet as a beacon
+            Serial.println("Packet received does not match beacon format has type" + String(packetType) + " — ignoring");
+            return true;
         }
     }
-
-    Serial.println("Beacon timeout");
-    return false;
+        Serial.println("Beacon timeout");
+        return false;
 }
 
 bool sendJoinRequest() {

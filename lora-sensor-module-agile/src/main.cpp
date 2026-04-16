@@ -64,4 +64,6 @@ void setup() {
     goToSleep(assignedSleepSeconds);
 }
 
-void loop() {}
+void loop() {
+    
+}
