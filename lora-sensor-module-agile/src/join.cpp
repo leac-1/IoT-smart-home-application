@@ -1,0 +1,99 @@
+#include <Arduino.h>
+#include "join.h"
+#include "packetBuilder.h"
+#include "pins.h"
+
+bool waitForBeacon(unsigned long timeoutMs) {
+    // Listen on Serial2 for an incoming packet from the RN2483
+    // RN2483 outputs "radio_rx  <hexstring>" when it receives a packet
+    
+    unsigned long start = millis();
+
+    while (millis() - start < timeoutMs) {
+        if (Serial2.available()) {
+            String response = Serial2.readStringUntil('\n');
+            Serial.println("RN2483: " + response);
+
+            if (response.indexOf("radio_rx") >= 0) {
+                // TODO: extract hex payload from response
+                // TODO: parse packet header — check byte 3 == 0x11 (Beacon)
+                // For now, treat any received packet as a beacon
+                Serial.println("Packet received — assuming beacon");
+                return true;
+            }
+        }
+    }
+
+    Serial.println("Beacon timeout");
+    return false;
+}
+
+bool sendJoinRequest() {
+    // Send a 0x0F JOIN request packet
+    // Source is 0x00 (no ID assigned yet)
+    // Destination is 0x00 (gateway)
+    unsigned char dst = 0x00;
+    unsigned char payload = 0x00; // 1 byte payload, nonce or 0x00 for now
+
+    unsigned char* packet = build_packet(0x0F, &payload, &dst, 1);
+    if (packet == NULL) {
+        Serial.println("Failed to build join request packet");
+        return false;
+    }
+
+    // Convert to hex string for RN2483
+    size_t packet_len = 6 + 1 + 4 + 1; // header + payload + MIC + CRC
+    String hexStr = "";
+    for (size_t i = 0; i < packet_len; i++) {
+        if (packet[i] < 0x10) hexStr += "0";
+        hexStr += String(packet[i], HEX);
+    }
+
+    free(packet);
+
+    // Transmit via RN2483
+    Serial2.println("radio tx " + hexStr);
+
+    String response = Serial2.readStringUntil('\n');
+    Serial.println("RN2483: " + response);
+
+    return response.indexOf("ok") >= 0;
+}
+
+bool receiveJoinAccept(NodeConfig& config) {
+    // TODO: listen on Serial2 for incoming packet
+    // Check packet type is 0x12 (JOIN accept)
+    // Extract from payload:
+    //   byte 0: assigned node ID
+    //   byte 1: TDMA slot
+    // Extract sleep time from 0x13 Configuration packet if sent separately
+    // Populate config struct and return true
+    Serial.println("Waiting for join accept...");
+    return false;
+}
+
+bool joinNetwork(NodeConfig& config, int maxRetries) {
+    for (int attempt = 0; attempt < maxRetries; attempt++) {
+        Serial.printf("Join attempt %d of %d\n", attempt + 1, maxRetries);
+
+        if (!waitForBeacon(10000)) {
+            Serial.println("No beacon received, retrying...");
+            continue;
+        }
+
+        if (!sendJoinRequest()) {
+            Serial.println("Failed to send join request, retrying...");
+            continue;
+        }
+
+        if (receiveJoinAccept(config)) {
+            Serial.printf("Joined! Assigned ID: %d\n", config.nodeId);
+            return true;
+        }
+
+        Serial.println("No join accept received, retrying...");
+    }
+
+    Serial.println("Failed to join network after max retries");
+    return false;
+}
