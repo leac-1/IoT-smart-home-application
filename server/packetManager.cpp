@@ -9,12 +9,11 @@ unsigned char* build_header(unsigned char type, const unsigned char* des, unsign
         return NULL;
     }
 
-    header[0] = 0x07;
-    header[1] = (source_address != NULL) ? *source_address : 0x00;
-    header[2] = (des != NULL) ? *des : 0x67;
-    header[3] = type;
-    header[4] = (counter >> 8) & 0xFF;  // Counter byte one (high byte)
-    header[5] = counter & 0xFF;         // Counter byte two (low byte)
+    header[0] = (source_address != NULL) ? *source_address : 0x00;
+    header[1] = (des != NULL) ? *des : 0x67;
+    header[2] = type;
+    header[3] = (counter >> 8) & 0xFF;  // Counter byte one (high byte)
+    header[4] = counter & 0xFF;         // Counter byte two (low byte)
 
     return header;
 }
@@ -32,10 +31,24 @@ unsigned char* MIC(unsigned char* type, const unsigned char* des) {
 
 unsigned char* CRC8(unsigned char* data) {
 
-    unsigned char* CRC8 = (unsigned char*)malloc(4);
-    
-    CRC8[0] = 0xBB;
-    return CRC8;
+    unsigned char* crc = (unsigned char*)malloc(1);
+    if (crc == NULL) {
+        return NULL;
+    }
+    crc[0] = 0x00;
+
+    for (size_t i = 0; i < 4; i++) {
+        crc[0] ^= data[i];
+        for (int b = 0; b < 8; b++) {
+            if (crc[0] & 0x80) {
+                crc[0] = (crc[0] << 1) ^ 0x07;
+            } else {
+                crc[0] <<= 1;
+            }
+        }
+    }
+
+    return crc;
 }
 
 unsigned char* build_packet(unsigned char type, unsigned char* data, size_t data_len, const unsigned char* des, unsigned char counter, size_t* out_packet_len) {
@@ -111,13 +124,22 @@ bool verifyPacketMICAndCRC(unsigned char* packet, size_t packetLength) {
     return micMatches && crcMatches;
 }
 
-bool isPacketForMe(unsigned char* packet) {
-    unsigned char* des = &packet[2];
-    if (des == NULL) {
-        return false;
+
+unsigned char* buildBeaconPayload(uint8_t SlotDuration, uint32_t cycleTime, uint8_t CurrentSlotCount) {
+
+    unsigned char* payload = (unsigned char*)malloc(7);
+    if (payload == NULL) {
+        return NULL;
     }
-    if ((source_address != NULL && *des == *source_address)) {
-        return true;
-    }
-    return false;
+
+    payload[0] = cycleTime & 0xFF; // Cycle time byte 1 (low byte)
+    payload[1] = (cycleTime >> 8) & 0xFF;
+    payload[2] = (cycleTime >> 16) & 0xFF;
+    payload[3] = (cycleTime >> 24) & 0xFF;
+    payload[4] = SlotDuration;
+    payload[5] = CurrentSlotCount;
+
+    return payload;
 }
+
+

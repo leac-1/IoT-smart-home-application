@@ -4,7 +4,7 @@
 
 #define RXD2 18
 #define TXD2 19
-#define RST 23
+#define RST 22
 
 HardwareSerial loraSerial(1);
 String str;
@@ -29,8 +29,9 @@ void sendMessage(unsigned char* fullPacket, size_t packetLength) {
     while (loraSerial.available()) {
         response += (char)loraSerial.read();
     }
-    Serial.print("RESP: ");
     Serial.println(response);
+    loraSerial.print("radio rx 0");
+    loraSerial.print("\r\n");
 }
 
 void setupLora(){
@@ -58,7 +59,7 @@ void setupLora(){
     str = loraSerial.readStringUntil('\n');
     Serial.println(str);
     //Set the frq between 863 and 867 MHz
-    loraSerial.println("radio set freq 863000000");
+    loraSerial.println("radio set freq 867000000");
     str = loraSerial.readStringUntil('\n');
     Serial.println(str);
     //Power in dBm. Max reach 14
