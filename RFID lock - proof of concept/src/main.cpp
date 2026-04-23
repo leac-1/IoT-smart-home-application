@@ -3,6 +3,16 @@
 #include <MFRC522.h>
 #include <ESP32Servo.h>
 #include "security.h"
+#include "LoraCom.h"
+
+unsigned char my_address = 0x01; 
+unsigned char* source_address = &my_address;
+
+// --- RN2483 Serial Settings ---
+#define RXD2 18
+#define TXD2 19
+#define RN_RST 22
+HardwareSerial loraSerial(2); // Use Serial2 for the RN2483
 
 // Initialise object pins for RFID reader and servo motor
 #define SS_PIN  21
@@ -28,45 +38,69 @@ byte authorizedUID[] = {0x63, 0x65, 0xBF, 0xF7};
 uint16_t currentLockState = STATE_LOCKED; // Track state as 16-bit for consistency
 uint16_t msg_counter = 0;
 
-void send_state_update(uint16_t state) {
-    // Header format: [src, dst, type, counter_hi, counter_lo]
-    unsigned char header[5];
-    header[0] = 0x01; // Source ID (this node)
-    header[1] = 0x00; // Destination ID (gateway)
-    header[2] = 0x0A; // Type (e.g., 0x0A for "Access Log")
+unsigned char* build_packet(unsigned char type, unsigned char* data, size_t data_len, const unsigned char* des, uint16_t msg_counter, size_t* out_packet_len) {
+    if (data == NULL) return NULL;
 
-    // Splitting the 16-bit counter into two 8-bit bytes for the header
-    header[3] = (unsigned char)(msg_counter >> 8); 
-    header[4] = (unsigned char)(msg_counter & 0xFF);
+    // 1. Build the 5-byte header [src, dst, type, count_hi, count_lo]
+    unsigned char* header = build_header(type, des, msg_counter);
+    if (header == NULL) return NULL;
 
-    // Prepare payload (state is 0 or 1, is treated as uint16_t)
-    unsigned char plaintext[2];
-    plaintext[0] = (unsigned char)(state >> 8);
-    plaintext[1] = (unsigned char)(state & 0xFF);
+    const size_t header_len = 5; // Updated: no preamble
+    size_t packet_size = header_len + data_len + 4 + 1; // Hdr + Data + MIC + CRC
 
-    // Packet: 5 (hdr) + 2 (data) + 4 (mic) = 11 bytes
-    unsigned char packet[11]; 
-    
-    // Call the encryption function
-    int ret = encrypt_and_mic(
+    unsigned char* packet = (unsigned char*)malloc(packet_size);
+    if (packet == NULL) { free(header); return NULL; }
+
+    // 2. Copy header to the start of packet
+    memcpy(packet, header, header_len);
+
+    // 3. ENCRYPT & MIC
+    // enc_out points to packet[5], mic_out points to packet[5 + data_len]
+    int res = encrypt_and_mic(
         header, 
-        plaintext, 
-        2, 
-        packet + 5, 
-        packet + 5 + 2
+        data, 
+        data_len, 
+        packet + header_len,           // Ciphertext output
+        packet + header_len + data_len // MIC output
     );
 
-    if (ret == 0) {
-        memcpy(packet, header, 5);
-        
-        // This is where you would call LoRa.write(packet, 11);
-        Serial.printf("State %04X sent securely. Counter is now: %u\n", state, msg_counter);
-        
-        msg_counter++; // Safely increments up to 65535
+    if (res != 0) {
+        free(header);
+        free(packet);
+        return NULL;
     }
-  }
 
+    // 4. Calculate CRC on the encrypted data
+    unsigned char* crc = CRC8(packet + header_len); // Run CRC on ciphertext
+    if (crc == NULL) {
+        free(header);
+        free(packet);
+        return NULL;
+    }
+    packet[packet_size - 1] = crc[0];
 
+    if (out_packet_len != NULL) *out_packet_len = packet_size;
+
+    free(header);
+    free(crc);
+    return packet;
+}
+
+void send_state_update(uint16_t state) {
+    unsigned char data[2] = { (unsigned char)(state >> 8), (unsigned char)(state & 0xFF) };
+    size_t packet_len;
+    unsigned char server_addr = 0x00; // Matching server's source_address = 0x00
+
+    unsigned char* packet = build_packet(0x0A, data, 2, &server_addr, msg_counter, &packet_len);
+    
+    if (packet != NULL) {
+        sendMessage(packet, packet_len);
+        Serial.printf("State %02X sent to Server. Counter: %u\n", state, msg_counter);
+        
+        free(packet); 
+        msg_counter++; 
+    }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -76,6 +110,7 @@ void setup() {
   myServo.write(0);      // Start in "Locked" position (90 is unlocked)
   currentLockState = STATE_LOCKED;
 
+  setupLora(); // Initialize com from LoraCom.h
   Serial.println("System Ready. Scan your card...");
 }
 
@@ -111,9 +146,7 @@ void loop() {
       }
       currentLockState = STATE_UNLOCKED;
       send_state_update(STATE_UNLOCKED);
-    } 
-  }
-    else {
+      } else {
       Serial.println("Authorized: Locking...");
       for (int pos = 90; pos <= 0; pos -= 1) { 
         myServo.write(pos);              
@@ -122,6 +155,7 @@ void loop() {
       currentLockState = STATE_LOCKED;
       send_state_update(STATE_LOCKED);
     }
+  }
   else {
         Serial.println("Access Denied.");
   }
