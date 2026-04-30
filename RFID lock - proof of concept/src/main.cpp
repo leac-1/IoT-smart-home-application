@@ -5,6 +5,8 @@
 #include "security.h"
 #include "LoraCom.h"
 #include "packetManager.h"
+#include <WiFi.h>
+
 
 unsigned char my_address = 0x01; 
 unsigned char* source_address = &my_address;
@@ -13,7 +15,6 @@ unsigned char* source_address = &my_address;
 #define RXD2 16
 #define TXD2 17
 #define RN_RST 25
-HardwareSerial loraSerial(2); // Use Serial2 for the RN2483
 
 // Initialise object pins for RFID reader and servo motor
 #define SS_PIN  21
@@ -56,6 +57,9 @@ void send_state_update(uint16_t state) {
 }
 
 void setup() {
+  WiFi.mode(WIFI_OFF); // Disable WiFi to save power, as it's not needed for this application
+  btStop(); // Disable Bluetooth to save power, as it's not needed for this application
+  setCpuFrequencyMhz(80); // lower CPU frequency to save power
   Serial.begin(115200);
   SPI.begin();           // RFID reader uses SPI bus
   rfid.PCD_Init();       // Tells RC522 to wake up and scan magnetic field for tags
@@ -71,10 +75,12 @@ void loop() {
   // Look for present tags (RFID cards)
   // Loop starts over if no card is present
   if (!rfid.PICC_IsNewCardPresent()) {
+    delay(100); // Delay to save power
     return;
   }
   // If a card is present, read its UID. Loop starts over if reading fails
   if (!rfid.PICC_ReadCardSerial()) {
+    delay(100); // Delay to save power
     return;
   }
 
@@ -102,7 +108,7 @@ void loop() {
       } 
       else {
       Serial.println("Authorized: Locking...");
-      for (int pos = 90; pos <= 0; pos -= 1) { 
+      for (int pos = 90; pos >= 0; pos -= 1) { 
         myServo.write(pos);              
         delay(15);
       }
