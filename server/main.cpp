@@ -45,7 +45,7 @@ void loop() {
             Serial.println("Failed to build beacon payload");
             return;
         }
-        size_t data_len = 7; // Length of the beacon payload
+        size_t data_len = 6; // Length of the beacon payload
         unsigned char des = 0x67;
 
         unsigned char header[5];
@@ -122,6 +122,10 @@ void loop() {
     unsigned long windowStart = millis();
     unsigned long windowLen = (unsigned long)SlotDuration * (unsigned long)CurrentSlotCount+1;
     
+    //for (int i = 0; i < CurrentSlotCount; i++) {
+    //    
+    //}
+
     while (millis() - windowStart < windowLen) {
         if (checkForJoinRequest()) {
             CurrentSlotCount++;

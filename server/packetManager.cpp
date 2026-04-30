@@ -30,14 +30,14 @@ unsigned char* MIC(unsigned char* type, const unsigned char* des) {
 }
 
 unsigned char* CRC8(unsigned char* data) {
-
     unsigned char* crc = (unsigned char*)malloc(1);
+    int data_len = strlen((char*)data);
     if (crc == NULL) {
         return NULL;
     }
     crc[0] = 0x00;
 
-    for (size_t i = 0; i < 4; i++) {
+    for (size_t i = 0; i < data_len; i++) {
         crc[0] ^= data[i];
         for (int b = 0; b < 8; b++) {
             if (crc[0] & 0x80) {
