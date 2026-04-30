@@ -2,12 +2,24 @@
 #include "HardwareSerial.h"
 
 
-#define RXD2 18
-#define TXD2 19
-#define RST 22
+#define RXD2 16
+#define TXD2 17
+#define RST 25
 
 HardwareSerial loraSerial(1);
 String str;
+
+void sleepLora() {
+    loraSerial.println("sys sleep 500"); // sleep 500ms
+}
+
+void wakeupLora() {
+    pinMode(RST, OUTPUT);
+    digitalWrite(RST, LOW);
+    delay(1);
+    digitalWrite(RST, HIGH);
+    delay(100); // give time to boot
+}
 
 void sendMessage(unsigned char* fullPacket, size_t packetLength) {
     if (fullPacket == NULL || packetLength == 0) {
