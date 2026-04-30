@@ -75,7 +75,7 @@ bool sendPayload(const uint8_t* payload, size_t length) {
         return false;
     }
 
-    size_t packet_len = 6 + length + 4 + 1;
+    size_t packet_len = 5 + length + 4 + 1;
     String hexStr = "";
     for (size_t i = 0; i < packet_len; i++) {
         if (packet[i] < 0x10) hexStr += "0";

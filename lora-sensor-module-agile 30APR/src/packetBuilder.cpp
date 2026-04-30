@@ -5,6 +5,8 @@
 
 unsigned char* source_address = NULL;
 static uint16_t packet_counter = 0;
+unsigned char CRC8(const unsigned char* data, size_t len);
+
 
 unsigned char* build_header(unsigned char type, const unsigned char* des) {
     unsigned char* header = (unsigned char*)malloc(5);
@@ -55,7 +57,7 @@ unsigned char* build_packet(unsigned char type, const unsigned char* data, const
     memcpy(packet, header, header_len);
     memcpy(packet + header_len, enc_out, data_len);
     memcpy(packet + header_len + data_len, mic_out, 4);
-    packet[packet_size - 1] = 0x00; // CRC not implemented
+    packet[packet_size - 1] = CRC8(enc_out, data_len);
 
     packet_counter++;
     free(header);
@@ -70,6 +72,25 @@ unsigned char* MIC(unsigned char* type, const unsigned char* des) {
     return NULL;
 }
 
-unsigned char* CRC8(char* data) {
-    return NULL;
+unsigned char CRC8(const unsigned char* data, size_t len) {
+    unsigned char crc = 0x00;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int b = 0; b < 8; b++) {
+            if (crc & 0x80) {
+                crc = (crc << 1) ^ 0x07;
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+    return crc;
+}
+
+void set_packet_counter(uint16_t value) {
+    packet_counter = value;
+}
+
+uint16_t get_packet_counter() {
+    return packet_counter;
 }
