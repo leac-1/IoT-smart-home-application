@@ -85,3 +85,19 @@ int decrypt_and_verify(const unsigned char* header, const unsigned char* ciphert
     mbedtls_ccm_free(&ctx);
     return (ret == 0) ? 0 : -1; // return 0 on success, -1 on error 
 }
+
+int decrypt_packet(const unsigned char* raw, size_t raw_len, unsigned char* plaintext_out) {
+    // Minimum: header(5) + at least 1 byte payload + MIC(4) + CRC(1) = 11 bytes
+    if (raw_len < 11) return -1;
+
+    const size_t header_len = 5;
+    const size_t mic_len = 4;
+    const size_t crc_len = 1;
+    size_t payload_len = raw_len - header_len - mic_len - crc_len;
+
+    const unsigned char* header     = raw;
+    const unsigned char* ciphertext = raw + header_len;
+    const unsigned char* mic        = raw + header_len + payload_len;
+
+    return decrypt_and_verify(header, ciphertext, payload_len, mic, plaintext_out);
+}
