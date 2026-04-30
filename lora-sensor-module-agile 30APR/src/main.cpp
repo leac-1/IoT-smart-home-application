@@ -7,6 +7,7 @@
 RTC_DATA_ATTR uint8_t rtcNodeId = 0;
 RTC_DATA_ATTR uint8_t rtcTdmaSlot = 0;
 RTC_DATA_ATTR bool rtcJoined = false;
+RTC_DATA_ATTR uint16_t rtcPacketCounter = 0;
 
 // Runtime config assigned during join
 uint8_t assignedNodeId = 0;
@@ -28,6 +29,7 @@ void setup() {
     delay(1000);
     initSensors();
     initLoRa();
+    set_packet_counter(rtcPacketCounter);
 
     if (!rtcJoined) {
         NodeConfig config;
@@ -82,6 +84,7 @@ void loop() {
     Serial.println();
 
     bool ok = sendPayload(payload, length);
+    rtcPacketCounter = get_packet_counter();
     Serial.println(ok ? "Send status: OK" : "Send status: FAIL");
 
     unsigned long timeUsed = sleepUntilSlot + config.slotDuration;
