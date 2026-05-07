@@ -41,6 +41,7 @@ byte authorizedUID[] = {0x63, 0x65, 0xBF, 0xF7};
 uint16_t currentLockState = STATE_LOCKED; // Track state as 16-bit for consistency
 uint16_t msg_counter = 0;
 
+
 void send_state_update(uint16_t state) {
     unsigned char data[2] = { (unsigned char)(state >> 8), (unsigned char)(state & 0xFF) };
     size_t packet_len;
@@ -73,14 +74,12 @@ void setup() {
 }
 
 void loop() {
-  wakeupLora(); // wake RN2483
   rfid.PCD_AntennaOn(); // wake RC522
   delay(10); // settle time
   unsigned long currentTime = millis();
 
   if (!rfid.PICC_IsNewCardPresent()) {
     rfid.PCD_AntennaOff();
-    sleepLora();
     esp_sleep_enable_timer_wakeup(500 * 1000);
     esp_light_sleep_start();
     return;
@@ -88,7 +87,6 @@ void loop() {
 
   if (!rfid.PICC_ReadCardSerial()) {
     rfid.PCD_AntennaOff();
-    sleepLora();
     esp_sleep_enable_timer_wakeup(500 * 1000);
     esp_light_sleep_start();
     return;
@@ -136,5 +134,4 @@ void loop() {
   rfid.PICC_HaltA();      // Stop reading - otherwise reader will keep reading same card and create jitter
   rfid.PCD_StopCrypto1(); // Clears the reader's internal buffer to be ready for the next card
   rfid.PCD_SoftPowerDown(); // Sleep RC522 after use
-  sleepLora(); // Sleep LoRa module
 }

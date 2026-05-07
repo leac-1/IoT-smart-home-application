@@ -14,11 +14,9 @@ void sleepLora() {
 }
 
 void wakeupLora() {
-    pinMode(RST, OUTPUT);
-    digitalWrite(RST, LOW);
-    delay(1);
-    digitalWrite(RST, HIGH);
-    delay(100); // give time to boot
+    loraSerial.print("\r\n");
+    delay(200); // give more time to wake to avoid bleeding into the command
+    while (loraSerial.available()) loraSerial.read(); // flush any response
 }
 
 void sendMessage(unsigned char* fullPacket, size_t packetLength) {
@@ -26,6 +24,11 @@ void sendMessage(unsigned char* fullPacket, size_t packetLength) {
         return;
     }
     
+    // Stop any ongoing receive before transmitting
+    loraSerial.print("radio rxstop\r\n");
+    delay(100);
+    while (loraSerial.available()) loraSerial.read(); // flush response
+
     String packetString = "";
     for (size_t i = 0; i < packetLength; i++) {
         char hexByte[3];
@@ -33,18 +36,15 @@ void sendMessage(unsigned char* fullPacket, size_t packetLength) {
         packetString += hexByte;
     }
 
-    loraSerial.print("radio tx " + packetString); //Send commands to RN
-    loraSerial.print("\r\n"); //Newline
-    delay(200); //Delay so the RN can response
-    String response = "";
-    //Read response from RN and print in serial monitor
-    while (loraSerial.available()) {
-        response += (char)loraSerial.read();
-    }
-    Serial.println(response);
-    loraSerial.print("radio rx 0");
-    loraSerial.print("\r\n");
+    loraSerial.print("radio tx " + packetString + "\r\n");
+    
+    String response1 = loraSerial.readStringUntil('\n'); // "ok"
+    Serial.println("TX 1: " + response1);
+    
+    String response2 = loraSerial.readStringUntil('\n'); // "radio_tx_ok"
+    Serial.println("TX 2: " + response2);
 }
+
 
 void setupLora(){
     loraSerial.begin(57600, SERIAL_8N1, RXD2, TXD2);
@@ -118,4 +118,3 @@ void setupLora(){
     Serial.println(str);
     Serial.println("starting loop");
 }
-
