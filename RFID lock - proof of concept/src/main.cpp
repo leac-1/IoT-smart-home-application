@@ -6,6 +6,7 @@
 #include "LoraCom.h"
 #include "packetManager.h"
 #include <WiFi.h>
+#include <esp_sleep.h>
 
 
 unsigned char my_address = 0x01; 
@@ -72,15 +73,24 @@ void setup() {
 }
 
 void loop() {
-  // Look for present tags (RFID cards)
-  // Loop starts over if no card is present
+  wakeupLora(); // wake RN2483
+  rfid.PCD_AntennaOn(); // wake RC522
+  delay(10); // settle time
+  unsigned long currentTime = millis();
+
   if (!rfid.PICC_IsNewCardPresent()) {
-    delay(100); // Delay to save power
+    rfid.PCD_AntennaOff();
+    sleepLora();
+    esp_sleep_enable_timer_wakeup(500 * 1000);
+    esp_light_sleep_start();
     return;
   }
-  // If a card is present, read its UID. Loop starts over if reading fails
+
   if (!rfid.PICC_ReadCardSerial()) {
-    delay(100); // Delay to save power
+    rfid.PCD_AntennaOff();
+    sleepLora();
+    esp_sleep_enable_timer_wakeup(500 * 1000);
+    esp_light_sleep_start();
     return;
   }
 
@@ -93,6 +103,7 @@ void loop() {
     if (rfid.uid.uidByte[i] != authorizedUID[i]) match = false; // if the UIDs dont match, sets match to false
   }
   Serial.println();
+  
 
   // UID matches authorizedUID, tells servo to unlock
   if (match) {
@@ -117,9 +128,13 @@ void loop() {
     }
   }
   else {
-        Serial.println("Access Denied.");
+    Serial.println("Access Denied.");
+    delay(1000); // 1 second cooldown after denied scan
+    return;
   }
 
   rfid.PICC_HaltA();      // Stop reading - otherwise reader will keep reading same card and create jitter
   rfid.PCD_StopCrypto1(); // Clears the reader's internal buffer to be ready for the next card
+  rfid.PCD_SoftPowerDown(); // Sleep RC522 after use
+  sleepLora(); // Sleep LoRa module
 }

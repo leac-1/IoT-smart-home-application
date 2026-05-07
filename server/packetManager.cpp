@@ -1,9 +1,13 @@
+#include <Arduino.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdint.h>
+#include "security.h"
+#include "LoraCom.h"
 extern unsigned char* source_address;
 
-unsigned char* build_header(unsigned char type, const unsigned char* des, unsigned char counter) {
+unsigned char* build_header(unsigned char type, const unsigned char* des, uint16_t counter) {
     unsigned char* header = (unsigned char*)malloc(6);
     if (header == NULL) {
         return NULL;
@@ -18,116 +22,33 @@ unsigned char* build_header(unsigned char type, const unsigned char* des, unsign
     return header;
 }
 
-unsigned char* MIC(unsigned char* type, const unsigned char* des) {
-
-    unsigned char* mic = (unsigned char*)malloc(4);
-
-    mic[0] = 0xFF;
-    mic[1] = 0xFF;
-    mic[2] = 0xFF;
-    mic[3] = 0xFF;
-    return mic;
-}
-
-unsigned char* CRC8(unsigned char* data) {
-
-    unsigned char* crc = (unsigned char*)malloc(1);
-    if (crc == NULL) {
-        return NULL;
-    }
-    crc[0] = 0x00;
-
-    for (size_t i = 0; i < 4; i++) {
-        crc[0] ^= data[i];
+unsigned char CRC8(const unsigned char* data, size_t len) {
+    unsigned char crc = 0x00;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
         for (int b = 0; b < 8; b++) {
-            if (crc[0] & 0x80) {
-                crc[0] = (crc[0] << 1) ^ 0x07;
+            if (crc & 0x80) {
+                crc = (crc << 1) ^ 0x07;
             } else {
-                crc[0] <<= 1;
+                crc <<= 1;
             }
         }
     }
-
     return crc;
 }
 
-unsigned char* build_packet(unsigned char type, unsigned char* data, size_t data_len, const unsigned char* des, unsigned char counter, size_t* out_packet_len) {
-    if (data == NULL) {
-        return NULL;
-    }
+bool verifyPacketCRC(unsigned char* packet, unsigned char* crc) {
+    
+    unsigned char computed_crc = CRC8(packet, strlen((char*)packet));
 
-    unsigned char* header = build_header(type, des, counter);
-    if (header == NULL) {
-        return NULL;
-    }
-
-    const size_t header_len = 6;
-    size_t packet_size = header_len + data_len + 4 + 1;
-
-    unsigned char* packet = (unsigned char*)malloc(packet_size);
-    if (packet == NULL) {
-        free(header);
-        return NULL;
-    }
-
-    memcpy(packet, header, header_len);
-    memcpy(packet + header_len, data, data_len);
-    free(header);
-
-    unsigned char* mic = MIC(&type, des);
-    unsigned char* crc = CRC8(data);
-    if (mic == NULL || crc == NULL) {
-        free(mic);
-        free(crc);
-        free(packet);
-        return NULL;
-    }
-
-    memcpy(packet + header_len + data_len, mic, 4);
-    memcpy(packet + header_len + data_len + 4, crc, 1);
-
-    free(mic);
-    free(crc);
-
-    if (out_packet_len != NULL) {
-        *out_packet_len = packet_size;
-    }
-
-    return packet;
-}
-
-bool verifyPacketMICAndCRC(unsigned char* packet, size_t packetLength) {
-    if (packet == NULL || packetLength < 11) {
-        return false;
-    }
-
-    unsigned char* type = &packet[3];
-    unsigned char* des = &packet[2];
-    unsigned char* mic = MIC(type, des);
-    unsigned char* data = &packet[6];
-    unsigned char* crc = CRC8(data);
-
-    size_t dataLength = packetLength - 6 - 4 - 1;
-
-    if (mic == NULL || crc == NULL) {
-        free(mic);
-        free(crc);
-        return false;
-    }
-
-    bool micMatches = (memcmp(mic, &packet[6 + dataLength], 4) == 0);
-    bool crcMatches = (memcmp(crc, &packet[6 + dataLength + 4], 1) == 0);
-
-    free(mic);
-    free(crc);
-
-    return micMatches && crcMatches;
+    bool is_valid = (computed_crc == crc[0]);
+    return is_valid;
 }
 
 
 unsigned char* buildBeaconPayload(uint8_t SlotDuration, uint32_t cycleTime, uint8_t CurrentSlotCount) {
 
-    unsigned char* payload = (unsigned char*)malloc(7);
+    unsigned char* payload = (unsigned char*)malloc(6);
     if (payload == NULL) {
         return NULL;
     }
@@ -142,4 +63,93 @@ unsigned char* buildBeaconPayload(uint8_t SlotDuration, uint32_t cycleTime, uint
     return payload;
 }
 
+void handleDataPacket(unsigned char* packet, size_t packet_len) {
+    const size_t header_len = 5;
+    const size_t mic_len = 4;
+    const size_t crc_len = 1;
+    if (packet_len < header_len + mic_len + crc_len) {
+        Serial.println("Packet too short");
+        return;
+    }
+    size_t data_len = packet_len - header_len - mic_len - crc_len;
 
+    unsigned char* header = packet;
+    unsigned char* data = packet + header_len;
+    unsigned char* mic = packet + header_len + data_len;
+    unsigned char* recieved_crc = packet + header_len + data_len + mic_len;
+
+    if (!verifyPacketCRC(data, recieved_crc)) {
+        Serial.println("CRC check failed");
+        return;
+    }
+
+    unsigned char* decrypted = (unsigned char*)malloc(data_len);
+    if (decrypted == NULL) {
+        Serial.println("Allocation failed for decrypted payload");
+        return;
+    }
+
+    int ret = decrypt_and_verify(header, data, data_len, mic, decrypted);
+    if (ret == 0) {
+        Serial.print("Decrypted payload: ");
+        for (size_t i = 0; i < data_len; i++) {
+            Serial.printf("%02X ", decrypted[i]);
+        }
+        Serial.println();
+    } else {
+        Serial.println("decrypt_and_verify failed (MIC mismatch or decryption error)");
+    }
+    free(decrypted);
+}
+
+bool packetRecieved() {
+    if (loraSerial.available()) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+unsigned char* getReceivedPacket(size_t* out_len) {
+    if (out_len != NULL) *out_len = 0;
+
+    String request = loraSerial.readStringUntil('\n');
+    if (request.startsWith("radio_err")) {
+        rearmReceive();
+        return NULL;
+    }
+    if (!request.startsWith("radio_rx")) {
+        return NULL;
+    }
+
+    int startIdx = request.indexOf("radio_rx") + 10;
+    if (startIdx < 10 || startIdx >= (int)request.length()) {
+        return NULL;
+    }
+    String hexPayload = request.substring(startIdx);
+    hexPayload.trim();
+
+    size_t totalBytes = hexPayload.length() / 2;
+    if (totalBytes == 0) {
+        return NULL;
+    }
+
+    auto nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return 0;
+    };
+
+    unsigned char* packet = (unsigned char*)malloc(totalBytes);
+    if (packet == NULL) {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < totalBytes; i++) {
+        packet[i] = (unsigned char)((nibble(hexPayload[2 * i]) << 4) | nibble(hexPayload[2 * i + 1]));
+    }
+
+    if (out_len != NULL) *out_len = totalBytes;
+    return packet;
+}
