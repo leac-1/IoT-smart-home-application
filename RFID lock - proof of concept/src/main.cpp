@@ -42,19 +42,36 @@ uint16_t currentLockState = STATE_LOCKED; // Track state as 16-bit for consisten
 uint16_t msg_counter = 0;
 
 void send_state_update(uint16_t state) {
-    unsigned char data[2] = { (unsigned char)(state >> 8), (unsigned char)(state & 0xFF) };
+    unsigned char plaintext[1] = { (unsigned char)(state & 0xFF) }; // just 0x00 or 0x01
+    unsigned char enc_out[1];
+    unsigned char mic_out[4];
     size_t packet_len;
-    unsigned char server_addr = 0x00; // Server src address
+    unsigned char server_addr = 0x00;
 
-    unsigned char* packet = build_packet(0x0A, data, 2, &server_addr, msg_counter, &packet_len);
+    unsigned char* packet = build_packet(0x0A, plaintext, 1, &server_addr, msg_counter, &packet_len);
     
-    if (packet != NULL) {
-        sendMessage(packet, packet_len);
-        Serial.printf("State %02X sent to Server. Counter: %u\n", state, msg_counter);
-        
-        free(packet); 
-        msg_counter++; 
+    if (packet == NULL) return;
+
+    unsigned char* header = packet;
+
+    int ret = encrypt_and_mic(header, plaintext, 1, enc_out, mic_out);
+    if (ret != 0) {
+        Serial.println("Encryption failed");
+        free(packet);
+        return;
     }
+
+    memcpy(packet + 5, enc_out, 1);
+    memcpy(packet + 5 + 1, mic_out, 4);
+
+    unsigned char crc = CRC8(enc_out, 1);
+    memcpy(packet + 5 + 1 + 4, &crc, 1);
+
+    sendMessage(packet, packet_len);
+    Serial.printf("State %02X sent to Server. Counter: %u\n", state, msg_counter);
+
+    free(packet);
+    msg_counter++;
 }
 
 void setup() {
@@ -73,14 +90,12 @@ void setup() {
 }
 
 void loop() {
-  wakeupLora(); // wake RN2483
   rfid.PCD_AntennaOn(); // wake RC522
   delay(10); // settle time
   unsigned long currentTime = millis();
 
   if (!rfid.PICC_IsNewCardPresent()) {
     rfid.PCD_AntennaOff();
-    sleepLora();
     esp_sleep_enable_timer_wakeup(500 * 1000);
     esp_light_sleep_start();
     return;
@@ -88,7 +103,6 @@ void loop() {
 
   if (!rfid.PICC_ReadCardSerial()) {
     rfid.PCD_AntennaOff();
-    sleepLora();
     esp_sleep_enable_timer_wakeup(500 * 1000);
     esp_light_sleep_start();
     return;
@@ -136,5 +150,4 @@ void loop() {
   rfid.PICC_HaltA();      // Stop reading - otherwise reader will keep reading same card and create jitter
   rfid.PCD_StopCrypto1(); // Clears the reader's internal buffer to be ready for the next card
   rfid.PCD_SoftPowerDown(); // Sleep RC522 after use
-  sleepLora(); // Sleep LoRa module
 }
