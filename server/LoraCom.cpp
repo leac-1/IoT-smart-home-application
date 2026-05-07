@@ -9,11 +9,18 @@
 HardwareSerial loraSerial(1);
 String str;
 
+void rearmReceive() {
+    loraSerial.print("radio rx 0\r\n");
+    String rxResponse = loraSerial.readStringUntil('\n');
+    Serial.print("rx (re-arm): "); Serial.println(rxResponse);
+}
+
 void sendMessage(unsigned char* fullPacket, size_t packetLength) {
+
     if (fullPacket == NULL || packetLength == 0) {
         return;
     }
-    
+
     String packetString = "";
     for (size_t i = 0; i < packetLength; i++) {
         char hexByte[3];
@@ -21,17 +28,29 @@ void sendMessage(unsigned char* fullPacket, size_t packetLength) {
         packetString += hexByte;
     }
 
-    loraSerial.print("radio tx " + packetString); //Send commands to RN
-    loraSerial.print("\r\n"); //Newline
-    delay(200); //Delay so the RN can response
-    String response = "";
-    //Read response from RN and print in serial monitor
-    while (loraSerial.available()) {
-        response += (char)loraSerial.read();
-    }
-    Serial.println(response);
-    loraSerial.print("radio rx 0");
+    // Take radio out of continuous RX before transmitting
+    loraSerial.print("radio rxstop\r\n");
+    String stopResp = loraSerial.readStringUntil('\n');
+    Serial.print("rxstop: "); Serial.println(stopResp);
+
+    loraSerial.print("radio tx " + packetString);
     loraSerial.print("\r\n");
+    Serial.println("Transmitting packet: " + packetString);
+
+    // First response: "ok" (accepted) or "busy"/"invalid_param" (rejected)
+    String txAck = loraSerial.readStringUntil('\n');
+    Serial.print("tx ack: "); Serial.println(txAck);
+
+    // If accepted, wait for the async completion: "radio_tx_ok" or "radio_err"
+    if (txAck.startsWith("ok")) {
+        String txDone = loraSerial.readStringUntil('\n');
+        Serial.print("tx done: "); Serial.println(txDone);
+    }
+
+    // Re-arm continuous receive
+    loraSerial.print("radio rx 0\r\n");
+    String rxResponse = loraSerial.readStringUntil('\n');
+    Serial.print("rx: "); Serial.println(rxResponse);
 }
 
 void setupLora(){

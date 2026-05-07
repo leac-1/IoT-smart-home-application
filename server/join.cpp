@@ -10,6 +10,12 @@ bool checkForJoinRequest() {
     String request = loraSerial.readStringUntil('\n');
     Serial.print("Received: ");
     Serial.println(request);
+    if (request.startsWith("radio_err")) {
+        // Reception aborted (CRC fail, sync mismatch, watchdog). Re-arm so we
+        // don't go deaf until the next beacon cycle.
+        rearmReceive();
+        return false;
+    }
     if (!request.startsWith("radio_rx")) return false;
 
     int startIdx = request.indexOf("radio_rx") + 10;
