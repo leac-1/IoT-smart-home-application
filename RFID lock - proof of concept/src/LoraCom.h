@@ -9,3 +9,4 @@ void setupLora();
 void sendMessage(unsigned char* fullPacket, size_t packetLength);
 void sleepLora();
 void wakeupLora();
+

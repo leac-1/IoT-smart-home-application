@@ -41,21 +41,37 @@ byte authorizedUID[] = {0x63, 0x65, 0xBF, 0xF7};
 uint16_t currentLockState = STATE_LOCKED; // Track state as 16-bit for consistency
 uint16_t msg_counter = 0;
 
-
 void send_state_update(uint16_t state) {
-    unsigned char data[2] = { (unsigned char)(state >> 8), (unsigned char)(state & 0xFF) };
+    unsigned char plaintext[1] = { (unsigned char)(state & 0xFF) }; // just 0x00 or 0x01
+    unsigned char enc_out[1];
+    unsigned char mic_out[4];
     size_t packet_len;
-    unsigned char server_addr = 0x00; // Server src address
+    unsigned char server_addr = 0x00;
 
-    unsigned char* packet = build_packet(0x0A, data, 2, &server_addr, msg_counter, &packet_len);
+    unsigned char* packet = build_packet(0x0A, plaintext, 1, &server_addr, msg_counter, &packet_len);
     
-    if (packet != NULL) {
-        sendMessage(packet, packet_len);
-        Serial.printf("State %02X sent to Server. Counter: %u\n", state, msg_counter);
-        
-        free(packet); 
-        msg_counter++; 
+    if (packet == NULL) return;
+
+    unsigned char* header = packet;
+
+    int ret = encrypt_and_mic(header, plaintext, 1, enc_out, mic_out);
+    if (ret != 0) {
+        Serial.println("Encryption failed");
+        free(packet);
+        return;
     }
+
+    memcpy(packet + 5, enc_out, 1);
+    memcpy(packet + 5 + 1, mic_out, 4);
+
+    unsigned char crc = CRC8(enc_out, 1);
+    memcpy(packet + 5 + 1 + 4, &crc, 1);
+
+    sendMessage(packet, packet_len);
+    Serial.printf("State %02X sent to Server. Counter: %u\n", state, msg_counter);
+
+    free(packet);
+    msg_counter++;
 }
 
 void setup() {
