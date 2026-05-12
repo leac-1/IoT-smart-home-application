@@ -11,6 +11,12 @@
 #include "join.cpp"
 #include "LoraCom.h"
 
+// NEW: Blynk and WebSocket functions
+extern void blynk_setup(const char* ssid, const char* pw);
+extern void blynk_loop();
+extern void ws_setup();
+extern void ws_loop();
+
 unsigned char* source_address = NULL;
 
 uint32_t cycleTime; // in ms
@@ -37,6 +43,10 @@ void setup() {
     Serial.begin(115200);
 
     setupLora();
+
+    // NEW: Connect to WiFi, Blynk and Cibicom WebSocket
+    blynk_setup("OnePlus12", "hej23457");
+    ws_setup();
 }
 
 void loop() {
@@ -128,9 +138,9 @@ void loop() {
             unsigned char* header = build_header(0x12, &slot_value, counter);
             unsigned char enc_out[2];
             unsigned char mic_out[4];
-            unsigned char* payload = (unsigned char*)malloc(2); // Empty payload for join response
-            payload[0] = slot_value; // destination address is the assigned slot number shifted
-            payload[1] = CurrentSlotCount - 1; // 0-based slot index (matches server slot loop i = 0..CurrentSlotCount-1)
+            unsigned char* payload = (unsigned char*)malloc(2);
+            payload[0] = slot_value;
+            payload[1] = CurrentSlotCount - 1;
             encrypt_and_mic(header, payload, 2, enc_out, mic_out);
             size_t join_packet_len = header_len + sizeof(enc_out) + sizeof(mic_out) + 1;
             unsigned char* join_packet = (unsigned char*)malloc(join_packet_len);
@@ -157,6 +167,11 @@ void loop() {
         }
         delay(25);
     }
+
+    // NEW: Keep Blynk and WebSocket alive
+    blynk_loop();
+    ws_loop();
+
     Serial.println("Empty time used in cycle: " + String((millis() - startTime) / 1000.0) + " s");
     Serial.println("Cycle complete. Total slots: " + String(CurrentSlotCount));
     Serial.println("-------------------------------");
