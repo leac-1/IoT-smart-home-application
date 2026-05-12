@@ -6,7 +6,17 @@
 #define BLYNK_PRINT Serial // Print debug messages to serial monitor
 
 #include <WiFi.h>
+#include <stdint.h>
 #include <BlynkSimpleEsp32.h>
+
+// Forward declarations for packet/message helpers provided elsewhere in the project.
+unsigned char* buildPacket(unsigned char msgType, unsigned char cmd, uint16_t counter,
+                           const unsigned char* payload, size_t payload_len,
+                           size_t* out_len);
+void sendMessage(unsigned char* packet, size_t packet_len);
+
+// Shared LoRa frame counter, defined in main.cpp.
+extern uint16_t counter;
 
 // Blynk setup function.
 // ssid = WiFi network name
@@ -45,10 +55,27 @@ void blynk_send(int pin, const char* value) {
     Blynk.virtualWrite(pin, value);
 }
 
+// Called automatically by the Blynk library when V9 (light switch) changes in the app.
+BLYNK_WRITE(V9) {
+    int lightState = param.asInt(); // Get the value from the app. 0 = off, 1 = on
+    Serial.print("Received light state from Blynk: ");
+    Serial.println(lightState);
+
+    unsigned char payload = lightState;
+    size_t cmd_packet_len = 0;
+    unsigned char* cmd_packet = buildPacket(0x02, 0x05, counter, &payload, 1, &cmd_packet_len);
+    if (cmd_packet != NULL) {
+        sendMessage(cmd_packet, cmd_packet_len);
+        counter++;
+        free(cmd_packet);
+    }
+}
+
 // We use a wrapper for Blynk.run(), because we get problems if our "main" code also wants to create blynk objects, since the library itself creates objects when included
 void blynk_loop(){
     Blynk.run();
 }
+
 /*
 // EXAMPLE USE!!!
 This will send some data to our 4 virtual pins in blynk every 5 seconds. It works fine with my home WiFi and should for any WiFi connection.

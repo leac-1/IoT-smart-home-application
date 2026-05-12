@@ -6,6 +6,20 @@
 #include "security.h"
 #include "LoraCom.h"
 extern unsigned char* source_address;
+String door_state = "unknown"; // "open", "closed" or "unknown"
+
+int temp0Pin = 0; // V pin double
+int lightLevelPin = 1; // V pin int
+int curtainStatePin = 2; // V pin String
+int lampStatePin = 3; // V pin String 
+int doorPin = 4; // V pin String
+int humidityPin = 5; // V pin int
+int batteryPin = 6; // V pin String
+int temp1Pin = 7; // V pin double
+int LoRaWANtempPin = 8; // V pin double
+
+extern void blynk_send(int pin, double value);
+extern void blynk_send(int pin, const char* value);
 
 unsigned char* build_header(unsigned char type, const unsigned char* des, uint16_t counter) {
     unsigned char* header = (unsigned char*)malloc(6);
@@ -37,12 +51,8 @@ unsigned char CRC8(const unsigned char* data, size_t len) {
     return crc;
 }
 
-bool verifyPacketCRC(unsigned char* packet, unsigned char* crc) {
-    
-    unsigned char computed_crc = CRC8(packet, strlen((char*)packet));
-
-    bool is_valid = (computed_crc == crc[0]);
-    return is_valid;
+bool verifyPacketCRC(const unsigned char* data, size_t len, unsigned char crc) {
+    return CRC8(data, len) == crc;
 }
 
 
@@ -63,6 +73,56 @@ unsigned char* buildBeaconPayload(uint8_t SlotDuration, uint32_t cycleTime, uint
     return payload;
 }
 
+// Build a full LoRa packet: [header(5) | encrypted_payload(payload_len) | MIC(4) | CRC(1)].
+// Caller owns the returned buffer and must free() it. Returns NULL on failure
+// (with *out_len set to 0). Does NOT send the packet or touch the counter —
+// the caller is responsible for sendMessage() and counter++.
+unsigned char* buildPacket(unsigned char type, unsigned char dest, uint16_t counter,
+                           const unsigned char* payload, size_t payload_len,
+                           size_t* out_len) {
+    if (out_len != NULL) *out_len = 0;
+    if (payload == NULL || payload_len == 0) return NULL;
+
+    const size_t header_len = 5;
+    const size_t mic_len = 4;
+    const size_t crc_len = 1;
+
+    unsigned char* header = build_header(type, &dest, counter);
+    if (header == NULL) return NULL;
+
+    unsigned char* enc_out = (unsigned char*)malloc(payload_len);
+    if (enc_out == NULL) {
+        free(header);
+        return NULL;
+    }
+    unsigned char mic_out[4];
+
+    if (encrypt_and_mic(header, payload, payload_len, enc_out, mic_out) != 0) {
+        free(header);
+        free(enc_out);
+        return NULL;
+    }
+
+    size_t packet_len = header_len + payload_len + mic_len + crc_len;
+    unsigned char* packet = (unsigned char*)malloc(packet_len);
+    if (packet == NULL) {
+        free(header);
+        free(enc_out);
+        return NULL;
+    }
+
+    memcpy(packet, header, header_len);
+    memcpy(packet + header_len, enc_out, payload_len);
+    memcpy(packet + header_len + payload_len, mic_out, mic_len);
+    packet[packet_len - 1] = CRC8(enc_out, payload_len);
+
+    free(header);
+    free(enc_out);
+
+    if (out_len != NULL) *out_len = packet_len;
+    return packet;
+}
+
 void handleDataPacket(unsigned char* packet, size_t packet_len) {
     const size_t header_len = 5;
     const size_t mic_len = 4;
@@ -78,8 +138,13 @@ void handleDataPacket(unsigned char* packet, size_t packet_len) {
     unsigned char* mic = packet + header_len + data_len;
     unsigned char* recieved_crc = packet + header_len + data_len + mic_len;
 
-    if (!verifyPacketCRC(data, recieved_crc)) {
+    if (!verifyPacketCRC(data, data_len, *recieved_crc)) {
         Serial.println("CRC check failed");
+        Serial.print("Received packet: ");
+        for (size_t i = 0; i < packet_len; i++) {
+            Serial.printf("%02X ", packet[i]);
+        }
+        Serial.println();
         return;
     }
 
@@ -91,11 +156,47 @@ void handleDataPacket(unsigned char* packet, size_t packet_len) {
 
     int ret = decrypt_and_verify(header, data, data_len, mic, decrypted);
     if (ret == 0) {
+        Serial.println("Packet decrypted and verified successfully");
         Serial.print("Decrypted payload: ");
         for (size_t i = 0; i < data_len; i++) {
             Serial.printf("%02X ", decrypted[i]);
         }
         Serial.println();
+
+        switch (header[2]) {
+            case 0x01: {
+                Serial.println("Handling data packet...");
+                double temp = ((decrypted[0] << 8) | decrypted[1])/10.0; // Assuming the first two bytes of the payload is temperature
+                int humidity = ((decrypted[2] << 8) | decrypted[3])/10.0; // Assuming the third and fourth byte of the payload is humidity
+                int lightLevel = ((decrypted[4] << 8) | decrypted[5])/10.0; // Assuming the fifth and sixth byte of the payload is light level
+                String batteyState = decrypted[6] == 0x00 ? "Battery OK" : "Low battery"; // Assuming the seventh byte of the payload is battery voltage
+                Serial.println("Temperature: " + String(temp) + " °C");
+                Serial.println("Humidity: " + String(humidity) + " %");
+                Serial.println("Light Level: " + String(lightLevel));
+                Serial.println("Battery State: " + batteyState);
+                blynk_send(temp0Pin, temp);
+                blynk_send(humidityPin, humidity);
+                blynk_send(lightLevelPin, lightLevel);
+                blynk_send(batteryPin, batteyState.c_str());
+                break;
+            }
+            case 0x0A: {
+                Serial.println("Handling door command packet...");
+                door_state = (data_len > 0 && data[0] == 0x01) ? "open" : "closed";
+                Serial.println("Door state updated to: " + door_state);
+                blynk_send(doorPin, door_state.c_str());
+                break;
+            }
+            case 0x03:{
+                Serial.println("Ack from light received");
+                break;
+            }
+            default: {
+                Serial.println("Unknown packet type, throwing out packet");
+                break;
+            }
+        }
+
     } else {
         Serial.println("decrypt_and_verify failed (MIC mismatch or decryption error)");
     }
