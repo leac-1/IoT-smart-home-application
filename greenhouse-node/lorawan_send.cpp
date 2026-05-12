@@ -126,32 +126,3 @@ bool lorawan_send(const unsigned char* data, size_t data_len, int port){
     }
 
 }
-
-/*
-Test code to run on campus next time:
-#include <Arduino.h>
-
-extern bool lorawan_setup();
-extern bool lorawan_send(const unsigned char* data, size_t data_len, int port);
-
-void setup() {
-    Serial.begin(115200);
-    delay(1000);
-    Serial.println("=== LoRaWAN Test ===");
-
-    if (lorawan_setup()) {
-        Serial.println("JOIN OK — sending test data...");
-
-        unsigned char payload[2] = {0xEB, 0x00};
-        if (lorawan_send(payload, 2, 1)) {
-            Serial.println("TEST PASSED — check Cibicom web interface");
-        } else {
-            Serial.println("TX FAILED — joined but could not send");
-        }
-    } else {
-        Serial.println("JOIN FAILED — check credentials or coverage");
-    }
-}
-
-void loop() {}
-*/
