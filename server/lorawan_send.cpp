@@ -4,11 +4,11 @@
 // Creds:
 // DevEUI: 0004A30B00F19BF4 (Remember that this value is unique to your RN2483 module)
 // JoinEUI: BE7A000000001465
-// AppKey: 0CB2E2496912AF60A946079DB2752947
+// AppKey: 19B357CC934F3AC997EE4A6CDA83FB03
 
 static const char* DEVEUI = "0004A30B00F19BF4";
 static const char* JoinEUI = "BE7A000000001465";
-static const char* APPKey = "0CB2E2496912AF60A946079DB2752947";
+static const char* APPKey = "19B357CC934F3AC997EE4A6CDA83FB03";
 // We'll use UART1 for communication with our module.
 static HardwareSerial loraSerial(1);
 // Pins for UART1:
