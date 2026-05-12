@@ -5,16 +5,17 @@
 
 void initLoRa() {
     Serial2.begin(57600, SERIAL_8N1, RN2483_RX_PIN, RN2483_TX_PIN);
+    
 
     pinMode(RN2483_RST_PIN, OUTPUT);
     digitalWrite(RN2483_RST_PIN, HIGH);
     digitalWrite(RN2483_RST_PIN, LOW);
     delay(200);
     digitalWrite(RN2483_RST_PIN, HIGH);
-    delay(500);
-
+    delay(1000); // increase from 500 to 1000
+    Serial.println("Waiting for RN2483 boot...");
     String str = Serial2.readStringUntil('\n');
-    Serial.println(str);
+    Serial.println("Boot message: [" + str + "]");
 
     Serial2.println("mac pause");
     str = Serial2.readStringUntil('\n');
@@ -58,6 +59,14 @@ void initLoRa() {
     Serial2.println("radio set bw 125");
     str = Serial2.readStringUntil('\n');
 
+    Serial2.println("radio get mod");
+    str = Serial2.readStringUntil('\n');
+    Serial.println("Radio mode: " + str);
+
+    Serial2.println("radio get freq");
+    str = Serial2.readStringUntil('\n');
+    Serial.println("Radio freq: " + str);
+    
     Serial.println("LoRa ready");
 }
 

@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <esp_sleep.h>
-#include "config.h"
 
 void goToSleep(unsigned long seconds) {
     Serial.printf("Sleeping for %lu seconds\n", seconds);

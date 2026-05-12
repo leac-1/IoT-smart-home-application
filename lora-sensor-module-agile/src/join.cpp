@@ -2,47 +2,57 @@
 #include "join.h"
 #include "packetBuilder.h"
 #include "pins.h"
+#include "security.h"
 
 bool waitForBeacon(unsigned long timeoutMs) {
-    // Listen on Serial2 for an incoming packet from the RN2483
-    // RN2483 outputs "radio_rx  <hexstring>" when it receives a packet
-    
     unsigned long start = millis();
 
+    Serial2.print("radio rx 0\r\n");
+    delay(500);
+
+    while (Serial2.available()) {
+        Serial2.readStringUntil('\n');
+    }
+
     while (millis() - start < timeoutMs) {
+        yield();
+        delay(1);
         if (Serial2.available()) {
             String response = Serial2.readStringUntil('\n');
+
+            if (response == "ok" || response == "ok\r") continue;
+
             Serial.println("RN2483: " + response);
 
             if (response.indexOf("radio_rx") >= 0) {
-                // Extract hex payload from response
-                int startIdx = response.indexOf("radio_rx") + 9; // Skip "radio_rx  "
+                int startIdx = response.indexOf("radio_rx") + 9;
                 String hexPayload = response.substring(startIdx);
-                
-                // Parse packet header — check byte 3 == 0x11 (Beacon)
-                if (hexPayload.length() >= 8) { // At least 4 bytes (8 hex chars)
-                    int packetType = strtol(hexPayload.substring(6, 8).c_str(), NULL, 16);
+
+                if (hexPayload.length() >= 8) {
+                    int packetType = strtol(hexPayload.substring(5, 7).c_str(), NULL, 16);
                     if (packetType == 0x11) {
-                        Serial.println("Packet received — assuming beacon");
+                        Serial.println("Beacon received");
                         return true;
+                    } else {
+                        Serial.println("Packet received but not a beacon, type: " + String(packetType, HEX) + " — ignoring");
                     }
                 }
             }
-            // For now, treat any received packet as a beacon
-            Serial.println("Packet received does not match beacon format has type" + String(packetType) + " — ignoring");
-            return true;
         }
     }
-        Serial.println("Beacon timeout");
-        return false;
+
+    Serial.println("Beacon timeout");
+    return false;
 }
 
 bool sendJoinRequest() {
-    // Send a 0x0F JOIN request packet
-    // Source is 0x00 (no ID assigned yet)
-    // Destination is 0x00 (gateway)
+    Serial2.print("radio rxstop\r\n");
+    delay(500);
+    Serial2.readStringUntil('\n');
+    Serial2.readStringUntil('\n');
+
     unsigned char dst = 0x00;
-    unsigned char payload = 0x00; // 1 byte payload, nonce or 0x00 for now
+    unsigned char payload = 0x00;
 
     unsigned char* packet = build_packet(0x0F, &payload, &dst, 1);
     if (packet == NULL) {
@@ -50,8 +60,7 @@ bool sendJoinRequest() {
         return false;
     }
 
-    // Convert to hex string for RN2483
-    size_t packet_len = 6 + 1 + 4 + 1; // header + payload + MIC + CRC
+    size_t packet_len = 5 + 1 + 4 + 1;
     String hexStr = "";
     for (size_t i = 0; i < packet_len; i++) {
         if (packet[i] < 0x10) hexStr += "0";
@@ -60,38 +69,57 @@ bool sendJoinRequest() {
 
     free(packet);
 
-    // Transmit via RN2483
-    Serial2.println("radio tx " + hexStr);
-
-    String response = Serial2.readStringUntil('\n');
-    Serial.println("RN2483: " + response);
-
+    Serial.println("Sending hex: " + hexStr);
+    Serial2.print("radio tx " + hexStr);
+    Serial2.print("\r\n");
+    delay(500);
+    String response = "";
+    while (Serial2.available()) {
+        response += (char)Serial2.read();
+    }
+    Serial.println("TX response: [" + response + "]");
     return response.indexOf("ok") >= 0;
 }
 
 bool receiveJoinAccept(NodeConfig& config) {
     Serial.println("Waiting for join accept...");
+    Serial2.print("radio rx 0\r\n");
+    while (Serial2.available()) Serial2.readStringUntil('\n');
     unsigned long start = millis();
-    const unsigned long timeout = 5000; // 5 second timeout
+    const unsigned long timeout = 5000;
 
     while (millis() - start < timeout) {
+        yield();
+
         if (Serial2.available()) {
             String response = Serial2.readStringUntil('\n');
             Serial.println("RN2483: " + response);
 
             if (response.indexOf("radio_rx") >= 0) {
-                // Extract hex payload
-                    int startIdx = response.indexOf("radio_rx") + 9;
-                    String hexPayload = response.substring(startIdx);
+                int startIdx = response.indexOf("radio_rx") + 9;
+                String hexPayload = response.substring(startIdx);
+                hexPayload.trim();
+                Serial.println("Received hex within JoinAccept: " + hexPayload);
 
                 if (hexPayload.length() >= 8) {
-                    int packetType = strtol(hexPayload.substring(6, 8).c_str(), NULL, 16);
-                    // Check for JOIN accept (0x12)
-                    if (packetType == 0x12) {
-                        // Extract node ID/address from byte 0 (chars 0-2)
-                        config.nodeId = strtol(hexPayload.substring(0, 2).c_str(), NULL, 16);
-                        // Extract TDMA slot from byte 1 (chars 2-4)
-                        config.tdmaSlot = strtol(hexPayload.substring(2, 4).c_str(), NULL, 16);
+                    String packetType = hexPayload.substring(4, 6);
+                    Serial.println("Packet type: " + packetType);
+
+                    if (packetType == "12") {
+                        // Convert hex string to raw bytes
+                        uint8_t rawBytes[12];
+                        for (int i = 0; i < 12; i++) {
+                            rawBytes[i] = strtol(hexPayload.substring(i * 2, i * 2 + 2).c_str(), NULL, 16);
+                        }
+
+                        unsigned char plaintext[2];
+                        if (decrypt_packet(rawBytes, 12, plaintext) != 0) {
+                            Serial.println("MIC verification failed — ignoring");
+                            continue;
+                        }
+
+                        config.nodeId = plaintext[0];
+                        config.tdmaSlot = plaintext[1];
                         Serial.printf("Join accepted! Node ID: %d, TDMA Slot: %d\n", config.nodeId, config.tdmaSlot);
                         return true;
                     }
@@ -122,11 +150,66 @@ bool joinNetwork(NodeConfig& config, int maxRetries) {
             return true;
         }
 
-
-
         Serial.println("No join accept received, retrying...");
     }
 
     Serial.println("Failed to join network after max retries");
+    return false;
+}
+
+bool waitForBeaconWithTDMA(NodeConfig& config) {
+    Serial.println("Waiting for beacon with TDMA info...");
+    Serial2.print("radio rx 0\r\n");
+    delay(500);
+    while (Serial2.available()) Serial2.readStringUntil('\n');
+
+    unsigned long start = millis();
+    const unsigned long timeout = 15000;
+
+    while (millis() - start < timeout) {
+        yield();
+        delay(1);
+        if (Serial2.available()) {
+            String response = Serial2.readStringUntil('\n');
+            if (response == "ok" || response == "ok\r") continue;
+
+            if (response.indexOf("radio_rx") >= 0) {
+                int startIdx = response.indexOf("radio_rx") + 9;
+                String hexPayload = response.substring(startIdx);
+                hexPayload.trim();
+
+                // Check type at position 4-5
+                String packetType = hexPayload.substring(4, 6);
+                if (packetType != "11") continue;
+
+                // Beacon is header(5) + payload(6) + MIC(4) + CRC(1) = 16 bytes
+                if (hexPayload.length() < 32) continue;
+
+                uint8_t rawBytes[16];
+                for (int i = 0; i < 16; i++) {
+                    rawBytes[i] = strtol(hexPayload.substring(i * 2, i * 2 + 2).c_str(), NULL, 16);
+                }
+
+                unsigned char plaintext[6];
+                if (decrypt_packet(rawBytes, 16, plaintext) != 0) {
+                    Serial.println("Beacon MIC verification failed");
+                    continue;
+                }
+
+                config.cycleTime     = ((uint32_t)plaintext[3] << 24) |
+                                       ((uint32_t)plaintext[2] << 16) |
+                                       ((uint32_t)plaintext[1] << 8)  |
+                                        (uint32_t)plaintext[0];
+
+                config.slotDuration      = (uint32_t)plaintext[4] * 100;
+                config.currentSlotCount  = (uint32_t)plaintext[5];
+
+                Serial.printf("Beacon: cycleTime=%lu ms, slotDuration=%d ms, currentSlotCount=%d\n",
+                    config.cycleTime, config.slotDuration, config.currentSlotCount);
+                return true;
+            }
+        }
+    }
+    Serial.println("TDMA beacon timeout");
     return false;
 }
