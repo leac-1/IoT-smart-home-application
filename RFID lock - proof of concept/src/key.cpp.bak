@@ -22,7 +22,7 @@ void setup() {
 }
 
 void loop() {
-  // Reset the loop if no new card is present
+  // Reset loop if no new card is present
   if (!mfrc522.PICC_IsNewCardPresent()) {
     return;
   }
@@ -32,7 +32,7 @@ void loop() {
     return;
   }
 
-  // Dump the UID to the Serial Monitor
+  // Dump UID to the Serial Monitor
   Serial.print(F("Card UID:"));
   for (byte i = 0; i < mfrc522.uid.size; i++) {
     Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");
