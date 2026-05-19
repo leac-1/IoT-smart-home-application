@@ -20,6 +20,8 @@ static uint8_t lastCurtainState = 0;
 // External symbols from main/LoraCom
 extern uint16_t counter;
 void sendMessage(unsigned char* packet, size_t packet_len);
+void queueCurtainCommand(uint8_t nodeId, uint8_t command);
+void clearCurtainCommand(uint8_t nodeId);
 
 int temp0Pin = 0; // V pin double
 int lightLevelPin = 1; // V pin int
@@ -213,20 +215,9 @@ void handleDataPacket(unsigned char* packet, size_t packet_len) {
                     // Map desiredCmd to desired state for comparison with lastCurtainState
                     uint8_t desiredState = (desiredCmd == 0x01) ? 1 : 2;
                     if (lastCurtainState != 0 && lastCurtainState == desiredState) {
-                        Serial.println("Curtain already in desired state — no command sent");
+                        Serial.println("Curtain already in desired state — no command queued");
                     } else {
-                        // Build and send command packet to curtain node
-                        unsigned char payload = desiredCmd;
-                        size_t cmd_packet_len = 0;
-                        unsigned char* cmd_packet = buildPacket(0x02, CURTAIN_NODE_ADDR, counter, &payload, 1, &cmd_packet_len);
-                        if (cmd_packet != NULL) {
-                            sendMessage(cmd_packet, cmd_packet_len);
-                            counter++;
-                            free(cmd_packet);
-                            Serial.printf("Sent curtain command 0x%02X to node 0x%02X\n", desiredCmd, CURTAIN_NODE_ADDR);
-                        } else {
-                            Serial.println("Failed to build curtain command packet");
-                        }
+                        queueCurtainCommand(CURTAIN_NODE_ADDR, desiredCmd);
                     }
                 }
                 break;
@@ -242,17 +233,10 @@ void handleDataPacket(unsigned char* packet, size_t packet_len) {
                     uint8_t desiredCmd = 0x02; // close curtain
                     uint8_t desiredState = 2;
                     if (lastCurtainState != 0 && lastCurtainState == desiredState) {
-                        Serial.println("Curtain already closed — no command sent (door event)");
+                        Serial.println("Curtain already closed — no command queued (door event)");
                     } else {
-                        unsigned char payload = desiredCmd;
-                        size_t cmd_packet_len = 0;
-                        unsigned char* cmd_packet = buildPacket(0x02, CURTAIN_NODE_ADDR, counter, &payload, 1, &cmd_packet_len);
-                        if (cmd_packet != NULL) {
-                            sendMessage(cmd_packet, cmd_packet_len);
-                            counter++;
-                            free(cmd_packet);
-                            Serial.println("Sent curtain CLOSE command due to door lock event");
-                        }
+                        queueCurtainCommand(CURTAIN_NODE_ADDR, desiredCmd);
+                        Serial.println("Queued curtain CLOSE command due to door lock event");
                     }
                 }
                 break;
@@ -266,25 +250,19 @@ void handleDataPacket(unsigned char* packet, size_t packet_len) {
                     String lightState = decrypted[0] == 0x01 ? "on" : "off";
                     Serial.println("Light state: " + lightState);
                     blynk_send(lampStatePin, lightState.c_str());
-                } else if (data_len == 6 && decrypted[0] == 0x04) {
-                    // Curtain state report (6 bytes: device_type | state | temp | humidity)
+                } else if (data_len == 5 && decrypted[0] == 0x04) {
+                    // Curtain state report (5 bytes: device_type | state | last_cmd | result | reason)
                     Serial.println("Curtain state report received");
                     uint8_t curtainState = decrypted[1];
-                    int16_t temp10 = ((int16_t)decrypted[2] << 8) | decrypted[3];
-                    uint16_t hum10 = ((uint16_t)decrypted[4] << 8) | decrypted[5];
-                    double temp = temp10 / 10.0;
-                    double humidity = hum10 / 10.0;
-                    
                     String stateStr = (curtainState == 1) ? "open" : (curtainState == 2) ? "closed" : "unknown";
                     Serial.println("Curtain state: " + stateStr);
-                    Serial.printf("Temperature: %.1f°C, Humidity: %.1f%%\n", temp, humidity);
                     
                     blynk_send(curtainStatePin, stateStr.c_str());
                     // Update last known curtain state
                     lastCurtainState = curtainState;
-                    // Optionally send temperature/humidity from curtain node to different pins
-                    // blynk_send(temp1Pin, temp);
-                    // blynk_send(humidityPin, humidity);
+                    clearCurtainCommand(header[0]);
+                    Serial.printf("Curtain status ack: lastCmd=0x%02X result=0x%02X reason=0x%02X\n",
+                        decrypted[2], decrypted[3], decrypted[4]);
                 } else {
                     Serial.println("Unknown state report format — ignoring");
                 }
