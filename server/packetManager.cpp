@@ -166,17 +166,26 @@ void handleDataPacket(unsigned char* packet, size_t packet_len) {
         switch (header[2]) {
             case 0x01: {
                 Serial.println("Handling data packet...");
-                double temp = ((decrypted[0] << 8) | decrypted[1])/10.0; // Assuming the first two bytes of the payload is temperature
-                int humidity = ((decrypted[2] << 8) | decrypted[3])/10.0; // Assuming the third and fourth byte of the payload is humidity
-                int lightLevel = ((decrypted[4] << 8) | decrypted[5])/10.0; // Assuming the fifth and sixth byte of the payload is light level
+                // Temperature is signed int16 in tenths of degrees
+                int16_t temp10 = ((int16_t)decrypted[0] << 8) | decrypted[1];
+                double temp = temp10 / 10.0;
+
+                // Humidity is unsigned uint16 in tenths of percent
+                uint16_t hum10 = ((uint16_t)decrypted[2] << 8) | decrypted[3];
+                double humidity = hum10 / 10.0;
+
+                // Light level is a raw uint16 value (no division)
+                uint16_t lightLevel = ((uint16_t)decrypted[4] << 8) | decrypted[5];
+
                 String batteyState = decrypted[6] == 0x00 ? "Battery OK" : "Low battery"; // Assuming the seventh byte of the payload is battery voltage
                 Serial.println("Temperature: " + String(temp) + " °C");
                 Serial.println("Humidity: " + String(humidity) + " %");
                 Serial.println("Light Level: " + String(lightLevel));
                 Serial.println("Battery State: " + batteyState);
+
                 blynk_send(temp0Pin, temp);
                 blynk_send(humidityPin, humidity);
-                blynk_send(lightLevelPin, lightLevel);
+                blynk_send(lightLevelPin, (double)lightLevel);
                 blynk_send(batteryPin, batteyState.c_str());
                 break;
             }
