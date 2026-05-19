@@ -187,8 +187,35 @@ void handleDataPacket(unsigned char* packet, size_t packet_len) {
                 blynk_send(doorPin, door_state.c_str());
                 break;
             }
-            case 0x03:{
-                Serial.println("Ack from light received");
+            case 0x03: {
+                // State report packet — could be from light node or curtain node
+                // Distinguish by payload length and device type
+                if (data_len == 1) {
+                    // Light state report (1 byte: 0x00=off, 0x01=on)
+                    Serial.println("Light state report received");
+                    String lightState = decrypted[0] == 0x01 ? "on" : "off";
+                    Serial.println("Light state: " + lightState);
+                    blynk_send(lampStatePin, lightState.c_str());
+                } else if (data_len == 6 && decrypted[0] == 0x04) {
+                    // Curtain state report (6 bytes: device_type | state | temp | humidity)
+                    Serial.println("Curtain state report received");
+                    uint8_t curtainState = decrypted[1];
+                    int16_t temp10 = ((int16_t)decrypted[2] << 8) | decrypted[3];
+                    uint16_t hum10 = ((uint16_t)decrypted[4] << 8) | decrypted[5];
+                    double temp = temp10 / 10.0;
+                    double humidity = hum10 / 10.0;
+                    
+                    String stateStr = (curtainState == 1) ? "open" : (curtainState == 2) ? "closed" : "unknown";
+                    Serial.println("Curtain state: " + stateStr);
+                    Serial.printf("Temperature: %.1f°C, Humidity: %.1f%%\n", temp, humidity);
+                    
+                    blynk_send(curtainStatePin, stateStr.c_str());
+                    // Optionally send temperature/humidity from curtain node to different pins
+                    // blynk_send(temp1Pin, temp);
+                    // blynk_send(humidityPin, humidity);
+                } else {
+                    Serial.println("Unknown state report format — ignoring");
+                }
                 break;
             }
             default: {

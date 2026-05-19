@@ -1,0 +1,8 @@
+# This directory is for project-specific libraries
+
+PlatformIO will look here for any custom libraries that are not in the official repositories.
+For this project, all required libraries are managed through platformio.ini:
+- DHT sensor library (Adafruit)
+- ESP32Servo library
+
+See ../README.md for more information.
