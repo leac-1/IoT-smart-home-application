@@ -57,6 +57,7 @@ int encrypt_and_mic(const unsigned char* header,
                     unsigned char* enc_out,
                     unsigned char* mic_out);
 
+// Not used for lock, since it only has one-way communication, it does not receive anything to decrypt.
 int decrypt_and_verify(const unsigned char* header,
                        const unsigned char* ciphertext,
                        size_t ciphertext_len,

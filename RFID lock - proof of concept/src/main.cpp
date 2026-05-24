@@ -12,12 +12,12 @@
 unsigned char my_address = 0x01; 
 unsigned char* source_address = &my_address;
 
-// --- RN2483 Serial Settings ---
+// RN2483 Serial Settings
 #define RXD2 16
 #define TXD2 17
 #define RN_RST 25
 
-// Initialise object pins for RFID reader and servo motor
+// Initialise object pins for RFID reader and servo
 #define SS_PIN  21
 #define RST_PIN 22
 #define SERVO_PIN 13
@@ -31,14 +31,14 @@ unsigned char* source_address = &my_address;
 #define STATE_LOCKED   0x00
 #define STATE_UNLOCKED 0x01
 
-// Creates objects for RFID reader and servo motor
+// Creates objects for RFID reader and servo
 MFRC522 rfid(SS_PIN, RST_PIN); 
 Servo myServo; 
 
-// RFID card UID that is authorized to unlock the door.
+// RFID card UID that is authorized to unlock the door
 byte authorizedUID[] = {0x63, 0x65, 0xBF, 0xF7}; 
 
-uint16_t currentLockState = STATE_LOCKED; // Track state as 16-bit for consistency
+uint16_t currentLockState = STATE_LOCKED; // Tracks state as 16-bit in accordance with protocol
 uint16_t msg_counter = 0;
 
 void send_state_update(uint16_t state) {
@@ -85,7 +85,7 @@ void setup() {
   myServo.write(0);      // Start in "Locked" position (90 is unlocked)
   currentLockState = STATE_LOCKED;
 
-  setupLora(); // Initialize com from LoraCom.h
+  setupLora(); // Initialize communication from LoraCom.h
   Serial.println("System Ready. Scan your card...");
 }
 
