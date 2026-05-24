@@ -11,24 +11,38 @@
 #include "join.cpp"
 #include "LoraCom.h"
 
-// NEW: Blynk and WebSocket functions
-extern void blynk_setup(const char* ssid, const char* pw);
-extern void blynk_loop();
-extern void ws_setup();
-extern void ws_loop();
+uint8_t lightAddress = 0x05; 
 
 unsigned char* source_address = NULL;
 
 uint32_t cycleTime; // in ms
 unsigned long lastCycleTime; // in ms
 
-uint8_t SlotDuration; // in ms
+uint16_t SlotDuration; // in ms
 uint8_t CurrentSlotCount; // in ms
 
 uint16_t counter = 0x0001;
 
 unsigned long startTime; // in ms
 
+
+// NEW: Blynk and WebSocket functions
+extern void blynk_setup(const char* ssid, const char* pw);
+extern void blynk_loop();
+extern void ws_setup();
+extern void ws_loop();
+
+// Network task: services WebSocket + Blynk on its own core so the LoRa
+// scheduling on the main loop can't starve them. Both libraries are touched
+// only from this task (blynk_send() runs inside the WS event handler), so no
+// locking is required.
+static void network_task(void* /*arg*/) {
+    for (;;) {
+        ws_loop();
+        blynk_loop();
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+}
 
 void setup() {
     source_address = (unsigned char*)malloc(1);
@@ -38,7 +52,7 @@ void setup() {
 
     cycleTime = 11000; // 11 seconds
     lastCycleTime = 0;
-    SlotDuration = 250; // 250 ms second
+    SlotDuration = 2500; // 2500 ms second
     CurrentSlotCount = 0;
     Serial.begin(115200);
 
@@ -47,6 +61,10 @@ void setup() {
     // NEW: Connect to WiFi, Blynk and Cibicom WebSocket
     blynk_setup("OnePlus12", "hej23457");
     ws_setup();
+
+    // Run WebSocket + Blynk on core 1 so LoRa cycle timing on core 0 can't
+    // block the TLS heartbeat. 16 KiB stack covers TLS + ArduinoJson buffers.
+    xTaskCreatePinnedToCore(network_task, "network", 16384, NULL, 1, NULL, 1);
 }
 
 void loop() {
@@ -54,56 +72,28 @@ void loop() {
     if ((long)(currentTime - lastCycleTime) >= (long)cycleTime) {
         lastCycleTime = currentTime;
         
-        unsigned char* data = buildBeaconPayload(SlotDuration, cycleTime, CurrentSlotCount);
+        unsigned char* data = buildBeaconPayload(SlotDuration/100, cycleTime, CurrentSlotCount);
         if (data == NULL) {
             Serial.println("Failed to build beacon payload");
             return;
         }
-        size_t data_len = 6; // Length of the beacon payload
-        unsigned char des = 0x67;
+        Serial.println("Built beacon payload: " + String(data[0]) + " " + String(data[1]) + " " + String(data[2]) + " " + String(data[3]) + " " + String(data[4]) + " " + String(data[5]));
 
-        unsigned char header[5];
-        header[0] = (source_address != NULL) ? *source_address : 0x00;
-        header[1] = des;
-        header[2] = 0x11;
-        header[3] = (counter >> 8) & 0xFF;
-        header[4] = counter & 0xFF;
-
-        unsigned char* encrypted_payload = (unsigned char*)malloc(data_len);
-        unsigned char mic[4];
-        if (encrypted_payload == NULL) {
-            Serial.println("Allocation failed for encrypted payload");
-            return;
-        }
-
-        int enc_ret = encrypt_and_mic(header, data, data_len, encrypted_payload, mic);
-        if (enc_ret != 0) {
-            Serial.println("encrypt_and_mic failed");
-            free(encrypted_payload);
-            return;
-        }
-
-        size_t packet_len = sizeof(header) + data_len + sizeof(mic) + 1;
-        unsigned char* tx_packet = (unsigned char*)malloc(packet_len);
+        size_t packet_len = 0;
+        unsigned char* tx_packet = buildPacket(0x11, 0x67, counter, data, 6, &packet_len);
+        free(data);
         if (tx_packet == NULL) {
-            Serial.println("Allocation failed for tx packet");
-            free(encrypted_payload);
+            Serial.println("Failed to build beacon packet");
             return;
         }
-
-        memcpy(tx_packet, header, sizeof(header));
-        memcpy(tx_packet + sizeof(header), encrypted_payload, data_len);
-        memcpy(tx_packet + sizeof(header) + data_len, mic, sizeof(mic));
-        tx_packet[packet_len - 1] = CRC8(encrypted_payload, data_len);
         Serial.println("Beacon Packet sent");
-
         sendMessage(tx_packet, packet_len);
         counter++;
         free(tx_packet);
-        free(encrypted_payload);
     }
-
+    delay(100);
     for (int i = 0; i < CurrentSlotCount; i++){
+        Serial.println("Listening for slot " + String(i+1) + " of " + String(CurrentSlotCount));
         startTime = millis();
         while ((millis() - lastCycleTime) < (unsigned long)(i+1) * SlotDuration) {
             if (packetRecieved()) {
@@ -120,7 +110,7 @@ void loop() {
 
             delay(25);
         }
-        Serial.println("Time used for slot: " + String((millis() - startTime) / 1000.0) + " s");
+        Serial.println("Time used for slot " + String(i+1) + ": " + String((millis() - startTime) / 1000.0) + " s");
     }
 
     unsigned long windowStart = millis();
@@ -134,26 +124,19 @@ void loop() {
             CurrentSlotCount++;
             CurrentSlotCount++;
             unsigned char slot_value = (CurrentSlotCount + 5) & 0xFF;
-            const size_t header_len = 5;
-            unsigned char* header = build_header(0x12, &slot_value, counter);
-            unsigned char enc_out[2];
-            unsigned char mic_out[4];
-            unsigned char* payload = (unsigned char*)malloc(2);
-            payload[0] = slot_value;
-            payload[1] = CurrentSlotCount - 1;
-            encrypt_and_mic(header, payload, 2, enc_out, mic_out);
-            size_t join_packet_len = header_len + sizeof(enc_out) + sizeof(mic_out) + 1;
-            unsigned char* join_packet = (unsigned char*)malloc(join_packet_len);
-            memcpy(join_packet, header, header_len);
-            memcpy(join_packet + header_len, enc_out, sizeof(enc_out));
-            memcpy(join_packet + header_len + sizeof(enc_out), mic_out, sizeof(mic_out));
-            join_packet[join_packet_len - 1] = CRC8(enc_out, sizeof(enc_out));
-            sendMessage(join_packet, join_packet_len);
-            counter++;
-            free(header);
-            free(payload);
-            free(join_packet);
-            Serial.println("Join response sent");
+            unsigned char payload[2];
+            payload[0] = slot_value; // destination address is the assigned slot number shifted
+            payload[1] = CurrentSlotCount - 1; // 0-based slot index (matches server slot loop i = 0..CurrentSlotCount-1)
+            size_t join_packet_len = 0;
+            unsigned char* join_packet = buildPacket(0x12, slot_value, counter, payload, 2, &join_packet_len);
+            if (join_packet == NULL) {
+                Serial.println("Failed to build join response packet");
+            } else {
+                sendMessage(join_packet, join_packet_len);
+                counter++;
+                free(join_packet);
+                Serial.println("Join response sent");
+            }
         } else if (loraSerial.available()) {
             Serial.println("Data packet received (in join window)");
             size_t packet_len = 0;
@@ -167,11 +150,6 @@ void loop() {
         }
         delay(25);
     }
-
-    // NEW: Keep Blynk and WebSocket alive
-    blynk_loop();
-    ws_loop();
-
     Serial.println("Empty time used in cycle: " + String((millis() - startTime) / 1000.0) + " s");
     Serial.println("Cycle complete. Total slots: " + String(CurrentSlotCount));
     Serial.println("-------------------------------");

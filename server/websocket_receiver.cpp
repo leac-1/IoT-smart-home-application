@@ -65,7 +65,7 @@ static void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
             if (port == 1 && byte_count >= 2) {
                 int16_t temp_raw = (bytes[1] << 8) | bytes[0];
                 float celsius = temp_raw / 10.0;
-                blynk_send(0, celsius);
+                blynk_send(8, celsius);
                 Serial.print("Temperature via LoRaWAN: ");
                 Serial.println(celsius);
             }
