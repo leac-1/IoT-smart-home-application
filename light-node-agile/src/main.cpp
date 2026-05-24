@@ -5,16 +5,6 @@
 #include "lora.h"
 #include "security.h"
 
-/*
- * Packet type byte allocation:
- * 0x0F — JOIN request        (light node → gateway)
- * 0x11 — Beacon              (gateway → all nodes)
- * 0x12 — JOIN accept         (gateway → light node)
- * 0x01 — Sensor data uplink  (sensor node → gateway)
- * 0x02 — Light command       (gateway → light node): 0x00 = off, 0x01 = on
- * 0x03 — Light state report  (light node → gateway): 0x00 = off, 0x01 = on
- */
-
 constexpr int LED_PIN = 2;
 
 uint8_t assignedNodeId = 0;
