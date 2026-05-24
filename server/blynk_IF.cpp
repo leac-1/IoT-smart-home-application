@@ -39,8 +39,10 @@ void blynk_setup(const char* ssid, const char* pw) {
     Serial.println(Blynk.connect(10) ? "Blynk connected" : "Blynk failed to connect");
 }
 
+// We MUST use wrappers for all functionality, since we cannot #include the library in the main server code.
+// This is because the library creates internal objects when the #include is ran based on our #define values.
+// Therefore conflicts will arise if we were to both include it in this file and in the main code.
 // We can do function overloading to handle both numeric and string values for sending stuff to the Blynk cloud 
-// This might be a bit overkill to do wrappers, but it's a nice to have to just use blynk_send(pin,value)
 // Blynk send() function. This will send a numeric value to a specific virtual pin in Blynk.
 // pin = virtual pin NUMBER (0 = V0, 1 = V1, etc.)
 // value = number to send
@@ -50,7 +52,7 @@ void blynk_send(int pin, double value) {
 }
 // Blynk send() function. This will send a string value to a specific virtual pin in Blynk.
 // Same as before. Now value is a pointer containing a string.
-// Example: blynk_send(2,"open"); Updates V2 (curtain state) to "open"
+// Example: blynk_send(2,"open"); Updates V2 to "open"
 void blynk_send(int pin, const char* value) {
     Blynk.virtualWrite(pin, value);
 }
@@ -71,7 +73,7 @@ BLYNK_WRITE(V9) {
     }
 }
 
-// We use a wrapper for Blynk.run(), because we get problems if our "main" code also wants to create blynk objects, since the library itself creates objects when included
+// Another wrapper
 void blynk_loop(){
     Blynk.run();
 }
