@@ -12,6 +12,7 @@
 #include "LoraCom.h"
 
 uint8_t lightAddress = 0x05; 
+uint8_t curtainAddress = 0x06;
 
 unsigned char* source_address = NULL;
 
@@ -22,6 +23,40 @@ uint16_t SlotDuration; // in ms
 uint8_t CurrentSlotCount; // in ms
 
 uint16_t counter = 0x0001;
+
+int nodeSlot[256];
+uint8_t pendingCurtainCommand[256];
+bool pendingCurtainCommandPresent[256];
+
+void queueCurtainCommand(uint8_t nodeId, uint8_t command) {
+    pendingCurtainCommand[nodeId] = command;
+    pendingCurtainCommandPresent[nodeId] = true;
+    Serial.printf("Queued curtain command 0x%02X for node 0x%02X\n", command, nodeId);
+}
+
+void clearCurtainCommand(uint8_t nodeId) {
+    pendingCurtainCommandPresent[nodeId] = false;
+}
+
+void sendQueuedCurtainCommand(uint8_t nodeId) {
+    if (!pendingCurtainCommandPresent[nodeId]) {
+        return;
+    }
+
+    uint8_t command = pendingCurtainCommand[nodeId];
+    unsigned char payload = command;
+    size_t packet_len = 0;
+    unsigned char* cmd_packet = buildPacket(0x02, nodeId, counter, &payload, 1, &packet_len);
+    if (cmd_packet == NULL) {
+        Serial.println("Failed to build queued curtain command packet");
+        return;
+    }
+
+    sendMessage(cmd_packet, packet_len);
+    counter++;
+    free(cmd_packet);
+    Serial.printf("Sent queued curtain command 0x%02X to node 0x%02X\n", command, nodeId);
+}
 
 unsigned long startTime; // in ms
 
@@ -54,6 +89,11 @@ void setup() {
     lastCycleTime = 0;
     SlotDuration = 2500; // 2500 ms second
     CurrentSlotCount = 0;
+    for (int i = 0; i < 256; i++) {
+        nodeSlot[i] = -1;
+        pendingCurtainCommandPresent[i] = false;
+        pendingCurtainCommand[i] = 0x00;
+    }
     Serial.begin(115200);
 
     setupLora();
@@ -94,6 +134,9 @@ void loop() {
     delay(100);
     for (int i = 0; i < CurrentSlotCount; i++){
         Serial.println("Listening for slot " + String(i+1) + " of " + String(CurrentSlotCount));
+        if (nodeSlot[curtainAddress] == i) {
+            sendQueuedCurtainCommand(curtainAddress);
+        }
         startTime = millis();
         while ((millis() - lastCycleTime) < (unsigned long)(i+1) * SlotDuration) {
             if (packetRecieved()) {
@@ -125,7 +168,7 @@ void loop() {
             CurrentSlotCount++;
             unsigned char slot_value = (CurrentSlotCount + 5) & 0xFF;
             unsigned char payload[2];
-            payload[0] = slot_value; // destination address is the assigned slot number shifted
+            payload[0] = slot_value; // assigned node ID
             payload[1] = CurrentSlotCount - 1; // 0-based slot index (matches server slot loop i = 0..CurrentSlotCount-1)
             size_t join_packet_len = 0;
             unsigned char* join_packet = buildPacket(0x12, slot_value, counter, payload, 2, &join_packet_len);
@@ -134,6 +177,8 @@ void loop() {
             } else {
                 sendMessage(join_packet, join_packet_len);
                 counter++;
+                nodeSlot[payload[0]] = payload[1];
+                Serial.printf("Stored slot mapping: node 0x%02X -> slot %d\n", payload[0], nodeSlot[payload[0]]);
                 free(join_packet);
                 Serial.println("Join response sent");
             }

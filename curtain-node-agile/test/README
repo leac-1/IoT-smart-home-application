@@ -1,0 +1,5 @@
+# Unit Tests
+To run tests in the future:
+```bash
+platformio test
+```
